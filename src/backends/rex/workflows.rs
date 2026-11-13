@@ -277,21 +277,53 @@ pub fn unbind(ctx: &Context, session: &str) -> Result<Option<Binding>> {
 
 // --- open ----------------------------------------------------------------------
 
+/// Whether a workflow switches a Rex app to the session it shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Switch<'a> {
+    /// Switch this app, or the one Rex picks when `None`.
+    App(Option<&'a str>),
+    /// Leave every app where it is: an agent or script works in the background.
+    Off,
+}
+
 /// How a workflow's request to show a session ended. Focus is best effort and
 /// never fails a workflow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Focus {
+    /// No switch was needed, or [`Switch::Off`] asked for none.
     NotNeeded,
     Switched,
     /// Rex refused (Remote Control off, no app): its message.
     Refused(String),
 }
 
-fn select(ctx: &Context, client: Option<&str>, session: &str) -> Focus {
+/// Switch an app to `session` as `switch` says; best effort.
+pub fn show(ctx: &Context, switch: Switch, session: &str) -> Focus {
+    let Switch::App(client) = switch else {
+        return Focus::NotNeeded;
+    };
     match ctx.rex.select_session(client, session) {
         Ok(()) => Focus::Switched,
         Err(e) => Focus::Refused(format!("{e:#}")),
     }
+}
+
+/// A new session labelled after `checkout`'s folder, with one interactive
+/// shell in it (in a window labelled `window_label`), bound to it. Nothing is
+/// left behind if the binding fails.
+fn create_bound_session(ctx: &Context, checkout: &Path, window_label: &str) -> Result<NewSession> {
+    let terminal = Terminal {
+        cwd: checkout.to_path_buf(),
+        command: None,
+    };
+    let new = ctx
+        .rex
+        .create_session(&basename(checkout), window_label, &terminal)?;
+    if let Err(e) = bind(ctx, &new.session_id, checkout) {
+        let _ = ctx.rex.destroy_session(&new.session_id);
+        return Err(e);
+    }
+    Ok(new)
 }
 
 /// A work tree `open` offers.
@@ -348,7 +380,7 @@ pub fn open_checkout(
     ctx: &Context,
     path: &Path,
     current_session: Option<&str>,
-    client: Option<&str>,
+    switch: Switch,
 ) -> Result<Opened> {
     let checkout = git::checkout_at(path)?;
     let host = ctx.rex.host_id()?;
@@ -363,22 +395,14 @@ pub fn open_checkout(
         Some((session, _)) => (session.session_id, false),
         None => {
             let label = basename(&checkout.path);
-            let terminal = Terminal {
-                cwd: checkout.path.clone(),
-                command: None,
-            };
-            let new = ctx.rex.create_session(&label, &label, &terminal)?;
-            if let Err(e) = bind(ctx, &new.session_id, &checkout.path) {
-                let _ = ctx.rex.destroy_session(&new.session_id);
-                return Err(e);
-            }
+            let new = create_bound_session(ctx, &checkout.path, &label)?;
             (new.session_id, true)
         }
     };
     let focus = if current_session == Some(session_id.as_str()) {
         Focus::NotNeeded
     } else {
-        select(ctx, client, &session_id)
+        show(ctx, switch, &session_id)
     };
     Ok(Opened {
         session_id,
@@ -531,12 +555,15 @@ pub enum SetupOutcome {
 /// outlives this one), then the worktree is force-removed, the branch deleted
 /// if this run created it and it is merged, the binding dropped, and this
 /// session closed last.
+///
+/// Without `adopted` tabs (`new --wait`), nothing is shown in Rex: no toast,
+/// focus, or report; the caller reports the outcome.
 pub fn run_setup(
     ctx: &Context,
     session: &str,
     from_session: &str,
     worktree: &CreatedWorktree,
-    adopted: &Adopted,
+    adopted: Option<&Adopted>,
 ) -> SetupOutcome {
     let prepared = git::main_checkout(&worktree.path).and_then(|main| {
         let config = config::load(&main, &ctx.settings.plugin_config())
@@ -551,7 +578,8 @@ pub fn run_setup(
     let err = match crate::run(&worktree.path, Some(&main), &config) {
         Ok(summary) => {
             let outcome = Outcome::Succeeded(&summary);
-            if let Some(toast) = notify::toast_for(config.notify.when, &worktree.branch, outcome) {
+            let toast = notify::toast_for(config.notify.when, &worktree.branch, outcome);
+            if let (Some(toast), Some(adopted)) = (toast, adopted) {
                 let terminal = Terminal {
                     cwd: worktree.path.clone(),
                     command: Some(ui::toast_command(&toast.title, &toast.body, TOAST_SECONDS)),
@@ -564,7 +592,7 @@ pub fn run_setup(
                     false,
                 );
                 if let Err(e) = shown {
-                    println!("[worktree-sync] could not show the toast: {e:#}");
+                    crate::progress!("[worktree-sync] could not show the toast: {e:#}");
                 }
             }
             return SetupOutcome::Succeeded(summary);
@@ -578,7 +606,7 @@ pub fn run_setup(
     }
 
     let report = write_report(ctx, worktree, &err);
-    if let Some(report) = &report {
+    if let (Some(report), Some(_)) = (&report, adopted) {
         let cwd = binding_of(ctx, from_session)
             .map(|b| b.checkout_path)
             .unwrap_or_else(|_| main.clone());
@@ -590,14 +618,18 @@ pub fn run_setup(
             .rex
             .new_layer(from_session, None, DIALOG_BOUNDS, &terminal, true)
         {
-            println!("[rollback] could not show the report: {e:#}");
+            crate::progress!("[rollback] could not show the report: {e:#}");
         }
     }
 
-    println!("[rollback] removing {}", worktree.path.display());
+    crate::progress!("[rollback] removing {}", worktree.path.display());
     if let Err(e) = git::remove_worktree(&main, &worktree.path, true) {
-        println!("[rollback] git refused to remove the worktree, leaving everything in place: {e}");
-        let _ = ctx.rex.focus_window(session, &adopted.setup_window);
+        crate::progress!(
+            "[rollback] git refused to remove the worktree, leaving everything in place: {e}"
+        );
+        if let Some(adopted) = adopted {
+            let _ = ctx.rex.focus_window(session, &adopted.setup_window);
+        }
         return SetupOutcome::Failed {
             error: format!("{err:#}"),
             report,
@@ -607,15 +639,15 @@ pub fn run_setup(
     }
     if worktree.new_branch {
         match git::delete_merged_branch(&main, &worktree.branch) {
-            Ok(()) => println!("[rollback] deleted branch {}", worktree.branch),
-            Err(e) => println!("[rollback] kept branch {}: {e:#}", worktree.branch),
+            Ok(()) => crate::progress!("[rollback] deleted branch {}", worktree.branch),
+            Err(e) => crate::progress!("[rollback] kept branch {}: {e:#}", worktree.branch),
         }
     }
     if let Err(e) = unbind(ctx, session) {
-        println!("[rollback] could not drop this session's binding: {e:#}");
+        crate::progress!("[rollback] could not drop this session's binding: {e:#}");
     }
     if let Err(e) = ctx.rex.destroy_session(session) {
-        println!("[rollback] could not close this session: {e:#}");
+        crate::progress!("[rollback] could not close this session: {e:#}");
     }
     SetupOutcome::Failed {
         error: format!("{err:#}"),
@@ -629,11 +661,11 @@ fn write_report(ctx: &Context, worktree: &CreatedWorktree, err: &anyhow::Error) 
     let body = report::compose(&worktree.branch, &worktree.path, err);
     match report::write(&ctx.reports_dir, &worktree.branch, &body) {
         Ok(path) => {
-            println!("[report] full failure report: {}", path.display());
+            crate::progress!("[report] full failure report: {}", path.display());
             Some(path)
         }
         Err(e) => {
-            println!("[report] could not write the failure report: {e:#}");
+            crate::progress!("[report] could not write the failure report: {e:#}");
             None
         }
     }
@@ -643,13 +675,15 @@ fn keep_failure(
     ctx: &Context,
     session: &str,
     worktree: &CreatedWorktree,
-    adopted: &Adopted,
+    adopted: Option<&Adopted>,
     err: &anyhow::Error,
     announce: bool,
 ) -> SetupOutcome {
     let report = write_report(ctx, worktree, err);
-    if let Err(e) = ctx.rex.focus_window(session, &adopted.setup_window) {
-        println!("[worktree-sync] could not focus the setup tab: {e:#}");
+    if let Some(adopted) = adopted
+        && let Err(e) = ctx.rex.focus_window(session, &adopted.setup_window)
+    {
+        crate::progress!("[worktree-sync] could not focus the setup tab: {e:#}");
     }
     SetupOutcome::Failed {
         error: format!("{err:#}"),
@@ -663,6 +697,61 @@ fn keep_failure(
 /// session made for it closes.
 pub fn cancel_new(ctx: &Context, session: &str) -> Result<()> {
     ctx.rex.destroy_session(session)
+}
+
+/// A worktree [`new_worktree`] set up, in a session of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewWorktree {
+    pub session_id: String,
+    /// The session's only block: an interactive shell in the worktree.
+    pub block_id: String,
+    pub checkout_path: PathBuf,
+    pub branch: String,
+}
+
+/// `new --wait`, for agents and scripts: create the worktree from
+/// `from_session`'s checkout (`base` defaults to its `HEAD`), a session in it
+/// with one `shell` tab, bound to it, and run the setup here, showing nothing
+/// in Rex. A failed setup is kept or rolled back per `[failure] action`, and
+/// the error says what is left and where the report is.
+pub fn new_worktree(
+    ctx: &Context,
+    from_session: &str,
+    branch: &str,
+    base: Option<&str>,
+) -> Result<NewWorktree> {
+    let created = create_worktree(ctx, from_session, branch, base.unwrap_or("HEAD"))?;
+    let path = created.path.display();
+    let session = create_bound_session(ctx, &created.path, SHELL_WINDOW_LABEL)
+        .with_context(|| format!("{path} was created, but no session could be made for it"))?;
+    match run_setup(ctx, &session.session_id, from_session, &created, None) {
+        SetupOutcome::Succeeded(_) => Ok(NewWorktree {
+            session_id: session.session_id,
+            block_id: session.block_id,
+            checkout_path: created.path,
+            branch: created.branch,
+        }),
+        SetupOutcome::Failed {
+            error,
+            report,
+            rolled_back,
+            ..
+        } => {
+            let report = match report {
+                Some(report) => format!("report: {}", report.display()),
+                None => "no report could be written".to_string(),
+            };
+            let left = if rolled_back {
+                format!("{path} was removed")
+            } else {
+                format!("{path} and its session {} were kept", session.session_id)
+            };
+            bail!(
+                "setting up {} failed: {error} ({report}); {left}",
+                created.branch
+            )
+        }
+    }
 }
 
 // --- remove --------------------------------------------------------------------
@@ -730,7 +819,7 @@ pub fn remove(
     plan: &RemovePlan,
     force: bool,
     current_session: Option<&str>,
-    client: Option<&str>,
+    switch: Switch,
 ) -> Result<Removed, RemoveError> {
     let host = ctx.rex.host_id().map_err(RemoveError::Failed)?;
     git::remove_worktree(&plan.main_checkout, &plan.checkout_path, force).map_err(|e| match e {
@@ -752,7 +841,7 @@ pub fn remove(
         })?;
 
     let focus = match &plan.parent {
-        Some(parent) => select(ctx, client, &parent.session_id),
+        Some(parent) => show(ctx, switch, &parent.session_id),
         None => Focus::NotNeeded,
     };
 
@@ -763,7 +852,7 @@ pub fn remove(
     for id in others.chain(current) {
         match ctx.rex.destroy_session(id) {
             Ok(()) => closed.push(id.to_string()),
-            Err(e) => println!("[remove] could not close session {id}: {e:#}"),
+            Err(e) => crate::progress!("[remove] could not close session {id}: {e:#}"),
         }
     }
     Ok(Removed { closed, focus })

@@ -15,10 +15,38 @@ pub mod notify;
 pub mod report;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 
 use crate::config::Config;
+
+static PROGRESS_ON_STDERR: AtomicBool = AtomicBool::new(false);
+
+/// Print [`progress!`] lines on stderr from now on, leaving stdout to a
+/// command's result. The Rex commands do; the Herdr plugin keeps them on
+/// stdout, where Herdr's plugin log expects them.
+pub fn progress_on_stderr() {
+    PROGRESS_ON_STDERR.store(true, Ordering::Relaxed);
+}
+
+#[doc(hidden)]
+pub fn print_progress(line: std::fmt::Arguments) {
+    if PROGRESS_ON_STDERR.load(Ordering::Relaxed) {
+        eprintln!("{line}");
+    } else {
+        println!("{line}");
+    }
+}
+
+/// `println!` for what a run is doing, as opposed to its result; see
+/// [`progress_on_stderr`].
+#[macro_export]
+macro_rules! progress {
+    ($($arg:tt)*) => {
+        $crate::print_progress(format_args!($($arg)*))
+    };
+}
 
 /// What a [`run`] actually did, for the end-of-run notification.
 ///

@@ -13,13 +13,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use common::git;
 use rex_support::fake_rex::{Call, HOST_ID};
 use rex_support::{BIN, Harness, branch_exists, commit, git_out, launched};
-use worktree_sync::backends::rex::api::Terminal;
+use worktree_sync::backends::rex::api::{Rex, Terminal};
 use worktree_sync::backends::rex::bindings::{Binding, Store};
 use worktree_sync::backends::rex::cli;
 use worktree_sync::backends::rex::ui::{self, TOAST_BOUNDS};
 use worktree_sync::backends::rex::workflows::{
     self as wf, ActionOutcome, ActionRequest, CreatedWorktree, Focus, NewLaunch, RemoveError,
-    SetupOutcome, Verb,
+    SetupOutcome, Switch, Verb,
 };
 use worktree_sync::git::generated_branch_slug;
 use worktree_sync::report;
@@ -534,7 +534,8 @@ fn opening_an_unbound_checkout_creates_binds_and_selects_a_session() {
     let a = h.linked(&repo, "feat/a");
     let from = h.bound_session("app", &repo);
 
-    let opened = wf::open_checkout(&h.ctx(), &a, Some(&from.session), Some(CLIENT)).unwrap();
+    let opened =
+        wf::open_checkout(&h.ctx(), &a, Some(&from.session), Switch::App(Some(CLIENT))).unwrap();
 
     assert!(opened.created);
     assert_eq!(opened.focus, Focus::Switched);
@@ -579,7 +580,7 @@ fn opening_a_main_checkout_binds_it_as_the_parent() {
     let h = Harness::new();
     let repo = h.repo();
 
-    let opened = wf::open_checkout(&h.ctx(), &repo.join("."), None, None).unwrap();
+    let opened = wf::open_checkout(&h.ctx(), &repo.join("."), None, Switch::App(None)).unwrap();
 
     assert!(opened.created);
     let binding = &h.bindings()[&opened.session_id];
@@ -597,7 +598,7 @@ fn opening_a_bound_checkout_selects_its_earliest_session() {
     h.seed_binding(&late.session, &a, 200);
     h.seed_binding(&early.session, &a, 100);
 
-    let opened = wf::open_checkout(&h.ctx(), &a, None, Some(CLIENT)).unwrap();
+    let opened = wf::open_checkout(&h.ctx(), &a, None, Switch::App(Some(CLIENT))).unwrap();
 
     assert!(!opened.created);
     assert_eq!(opened.session_id, early.session);
@@ -621,7 +622,7 @@ fn equal_bind_times_are_ordered_by_session_id() {
     h.seed_binding(&first.session, &repo, 100);
     assert!(first.session < second.session);
 
-    let opened = wf::open_checkout(&h.ctx(), &repo, None, None).unwrap();
+    let opened = wf::open_checkout(&h.ctx(), &repo, None, Switch::App(None)).unwrap();
 
     assert_eq!(opened.session_id, first.session);
 }
@@ -632,7 +633,8 @@ fn opening_the_current_sessions_checkout_switches_nothing() {
     let repo = h.repo();
     let s = h.bound_session("app", &repo);
 
-    let opened = wf::open_checkout(&h.ctx(), &repo, Some(&s.session), Some(CLIENT)).unwrap();
+    let opened =
+        wf::open_checkout(&h.ctx(), &repo, Some(&s.session), Switch::App(Some(CLIENT))).unwrap();
 
     assert_eq!(opened.session_id, s.session);
     assert_eq!(opened.focus, Focus::NotNeeded);
@@ -648,7 +650,7 @@ fn a_refused_switch_does_not_fail_open() {
     let a = h.linked(&repo, "feat/a");
     h.rex.refuse_select("Turn on Remote Control");
 
-    let opened = wf::open_checkout(&h.ctx(), &a, None, Some(CLIENT)).unwrap();
+    let opened = wf::open_checkout(&h.ctx(), &a, None, Switch::App(Some(CLIENT))).unwrap();
 
     match &opened.focus {
         Focus::Refused(message) => assert!(message.contains("Turn on Remote Control"), "{message}"),
@@ -664,9 +666,29 @@ fn opening_a_path_outside_any_work_tree_creates_nothing() {
     let plain = h.base.join("plain");
     std::fs::create_dir_all(&plain).unwrap();
 
-    assert!(wf::open_checkout(&h.ctx(), &plain, None, None).is_err());
+    assert!(wf::open_checkout(&h.ctx(), &plain, None, Switch::App(None)).is_err());
     assert_eq!(h.rex.calls(), []);
     assert!(h.bindings().is_empty());
+}
+
+/// For agents and scripts: the session is made and bound, and every app stays
+/// where it is.
+#[test]
+fn opening_without_switching_leaves_the_apps_alone() {
+    let h = Harness::new();
+    let repo = h.repo();
+    let a = h.linked(&repo, "feat/a");
+
+    let opened = wf::open_checkout(&h.ctx(), &a, None, Switch::Off).unwrap();
+
+    assert!(opened.created);
+    assert_eq!(opened.focus, Focus::NotNeeded);
+    let calls = h.rex.calls();
+    assert!(
+        matches!(calls.as_slice(), [Call::CreateSession { .. }]),
+        "{calls:?}"
+    );
+    assert_eq!(h.bindings()[&opened.session_id].checkout_path, a);
 }
 
 // =============================================================================
@@ -981,7 +1003,13 @@ fn a_successful_setup_runs_the_lifecycle_and_toasts_in_the_shell_tab() {
     let adopted = adopt(&f);
     let before = f.h.rex.calls().len();
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     let SetupOutcome::Succeeded(summary) = outcome else {
         panic!("{outcome:?}")
@@ -1023,7 +1051,13 @@ fn a_repo_without_config_sets_up_silently() {
     let adopted = adopt(&f);
     let before = f.h.rex.calls().len();
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     assert!(
         matches!(outcome, SetupOutcome::Succeeded(ref s) if s.is_empty()),
@@ -1041,7 +1075,13 @@ fn notify_failure_suppresses_the_success_toast() {
     let adopted = adopt(&f);
     let before = f.h.rex.calls().len();
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     assert!(matches!(outcome, SetupOutcome::Succeeded(_)), "{outcome:?}");
     assert_eq!(f.h.rex.calls().len(), before);
@@ -1055,7 +1095,13 @@ fn a_failed_setup_with_keep_leaves_everything_and_focuses_the_report() {
     let adopted = adopt(&f);
     let before = f.h.rex.calls().len();
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     let SetupOutcome::Failed {
         error,
@@ -1098,7 +1144,13 @@ fn notify_never_keeps_a_failure_quiet() {
     let f = new_fixture(Some(&failing("keep", "never")), "feat/login");
     let adopted = adopt(&f);
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     assert!(
         matches!(
@@ -1156,7 +1208,13 @@ fn a_failed_setup_with_remove_reports_then_rolls_back_then_closes_itself() {
     let adopted = adopt(&f);
     let seen = watch(&f);
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     let SetupOutcome::Failed {
         report,
@@ -1221,7 +1279,7 @@ fn rollback_keeps_a_branch_that_existed_before() {
     assert!(!created.new_branch);
     let adopted = wf::adopt_worktree(&h.ctx(), &n.session, &n.block, &created).unwrap();
 
-    let outcome = wf::run_setup(&h.ctx(), &n.session, &from, &created, &adopted);
+    let outcome = wf::run_setup(&h.ctx(), &n.session, &from, &created, Some(&adopted));
 
     assert!(
         matches!(
@@ -1251,7 +1309,13 @@ action = "remove"
     let f = new_fixture(Some(config), "feat/login");
     let adopted = adopt(&f);
 
-    let outcome = wf::run_setup(&f.h.ctx(), &f.n.session, &f.from, &f.created, &adopted);
+    let outcome = wf::run_setup(
+        &f.h.ctx(),
+        &f.n.session,
+        &f.from,
+        &f.created,
+        Some(&adopted),
+    );
 
     assert!(
         matches!(
@@ -1288,6 +1352,146 @@ fn cancelling_new_closes_its_session_and_creates_nothing() {
     );
     assert!(!h.settings.worktree_directory.exists());
     assert_eq!(h.bindings(), bindings_before);
+}
+
+// --- new --wait (agents and scripts) -------------------------------------------
+
+/// The worktree, a session in it with one shell, bound to it, and the setup run
+/// before returning. Rex shows nothing more: no setup tab, toast, or switch.
+#[test]
+fn new_worktree_sets_up_a_bound_session_and_shows_nothing_else() {
+    let h = Harness::new();
+    let repo = h.repo();
+    h.write_repo_config(&repo, HOOK_OK);
+    let from = h.bound_session("app", &repo).session;
+
+    let made = wf::new_worktree(&h.ctx(), &from, "feat/login", None).unwrap();
+
+    let path = h.worktree_path("feat-login");
+    assert_eq!(made.checkout_path, path);
+    assert_eq!(made.branch, "feat/login");
+    assert_eq!(
+        std::fs::read_to_string(path.join("hook.log")).unwrap(),
+        "ran\n",
+        "the setup ran before returning"
+    );
+    assert_eq!(
+        h.rex.calls(),
+        [Call::CreateSession {
+            session: made.session_id.clone(),
+            label: "feat-login".into(),
+            window_label: "shell".into(),
+            terminal: Terminal {
+                cwd: path.clone(),
+                command: None
+            },
+        }]
+    );
+    assert!(
+        h.rex
+            .window_of_block(&made.session_id, &made.block_id)
+            .is_ok(),
+        "the block is the session's shell"
+    );
+    let binding = &h.bindings()[&made.session_id];
+    assert_eq!(binding.checkout_path, path);
+    assert!(binding.is_linked_worktree);
+}
+
+#[test]
+fn new_worktree_starts_a_new_branch_at_the_base_or_the_origin_head() {
+    let h = Harness::new();
+    let repo = h.repo();
+    let first = git_out(&repo, &["rev-parse", "HEAD"]);
+    commit(&repo, "second");
+    let head = git_out(&repo, &["rev-parse", "HEAD"]);
+    let from = h.bound_session("app", &repo).session;
+
+    let at_base = wf::new_worktree(&h.ctx(), &from, "feat/old", Some(&first)).unwrap();
+    let at_head = wf::new_worktree(&h.ctx(), &from, "feat/new", None).unwrap();
+
+    assert_eq!(
+        git_out(&at_base.checkout_path, &["rev-parse", "HEAD"]),
+        first
+    );
+    assert_eq!(
+        git_out(&at_head.checkout_path, &["rev-parse", "HEAD"]),
+        head
+    );
+}
+
+#[test]
+fn new_worktree_with_a_bad_branch_creates_nothing() {
+    let h = Harness::new();
+    let repo = h.repo();
+    let from = h.bound_session("app", &repo).session;
+
+    assert!(wf::new_worktree(&h.ctx(), &from, "bad..name", None).is_err());
+
+    assert_eq!(h.rex.calls(), []);
+    assert!(!h.settings.worktree_directory.exists());
+}
+
+/// A failed setup follows `[failure] action` as in the setup tab, but tells the
+/// caller instead of showing anything. With `keep`, the worktree and its
+/// session stay, and the error says where they and the report are.
+#[test]
+fn a_failed_new_worktree_with_keep_stays_and_the_error_says_where() {
+    let h = Harness::new();
+    let repo = h.repo();
+    h.write_repo_config(&repo, &failing("keep", "always"));
+    let from = h.bound_session("app", &repo).session;
+
+    let err = wf::new_worktree(&h.ctx(), &from, "feat/login", None).unwrap_err();
+
+    let calls = h.rex.calls();
+    let [Call::CreateSession { session, .. }] = calls.as_slice() else {
+        panic!("only the session is made: {calls:?}")
+    };
+    let path = h.worktree_path("feat-login");
+    let report = h.reports_dir().join(report::report_file_name("feat/login"));
+    assert!(report.exists());
+    let message = format!("{err:#}");
+    for part in [
+        session.clone(),
+        path.display().to_string(),
+        report.display().to_string(),
+    ] {
+        assert!(message.contains(&part), "{part} missing from: {message}");
+    }
+    assert!(h.rex.is_live(session));
+    assert_eq!(h.bindings()[session].checkout_path, path);
+}
+
+/// With `remove`, the worktree, the branch this run created, the binding and
+/// the session go; the report stays, and the error names it.
+#[test]
+fn a_failed_new_worktree_with_remove_is_rolled_back_and_names_the_report() {
+    let h = Harness::new();
+    let repo = h.repo();
+    h.write_repo_config(&repo, &failing("remove", "always"));
+    let from = h.bound_session("app", &repo).session;
+
+    let err = wf::new_worktree(&h.ctx(), &from, "feat/login", None).unwrap_err();
+
+    let calls = h.rex.calls();
+    let [
+        Call::CreateSession { session, .. },
+        Call::Destroy { session: destroyed },
+    ] = calls.as_slice()
+    else {
+        panic!("the session is made, then closed; nothing is shown: {calls:?}")
+    };
+    assert_eq!(session, destroyed);
+    assert!(!h.worktree_path("feat-login").exists());
+    assert!(!branch_exists(&repo, "feat/login"));
+    assert!(!h.bindings().contains_key(session));
+    let report = h.reports_dir().join(report::report_file_name("feat/login"));
+    assert!(report.exists());
+    assert!(
+        format!("{err:#}").contains(&report.display().to_string()),
+        "{err:#}"
+    );
 }
 
 // =============================================================================
@@ -1404,8 +1608,14 @@ fn removing_a_clean_worktree_keeps_the_branch_and_closes_its_sessions_last_one_l
     let f = remove_fixture();
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
 
-    let removed = wf::remove(&f.h.ctx(), &plan, false, Some(&f.current), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    let removed = wf::remove(
+        &f.h.ctx(),
+        &plan,
+        false,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert!(!f.linked.exists());
     assert!(
@@ -1444,8 +1654,8 @@ fn removing_from_outside_closes_every_bound_session() {
     let f = remove_fixture();
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
 
-    let removed =
-        wf::remove(&f.h.ctx(), &plan, false, None, None).unwrap_or_else(|e| panic!("{e:?}"));
+    let removed = wf::remove(&f.h.ctx(), &plan, false, None, Switch::App(None))
+        .unwrap_or_else(|e| panic!("{e:?}"));
 
     let mut closed = removed.closed.clone();
     closed.sort();
@@ -1464,7 +1674,14 @@ fn a_dirty_worktree_is_not_removed_without_force() {
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
     let bindings_before = f.h.bindings();
 
-    let err = wf::remove(&f.h.ctx(), &plan, false, Some(&f.current), Some(CLIENT)).unwrap_err();
+    let err = wf::remove(
+        &f.h.ctx(),
+        &plan,
+        false,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_err();
 
     assert!(matches!(err, RemoveError::NeedsForce(_)), "{err:?}");
     assert_eq!(
@@ -1481,8 +1698,14 @@ fn a_dirty_worktree_is_removed_with_force() {
     std::fs::write(f.linked.join("notes.txt"), "scratch").unwrap();
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
 
-    wf::remove(&f.h.ctx(), &plan, true, Some(&f.current), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    wf::remove(
+        &f.h.ctx(),
+        &plan,
+        true,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert!(!f.linked.exists());
     assert!(branch_exists(&f.repo, "feat/a"));
@@ -1498,7 +1721,14 @@ fn a_git_failure_leaves_everything_in_place() {
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
     let bindings_before = f.h.bindings();
 
-    let err = wf::remove(&f.h.ctx(), &plan, true, Some(&f.current), Some(CLIENT)).unwrap_err();
+    let err = wf::remove(
+        &f.h.ctx(),
+        &plan,
+        true,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_err();
 
     assert!(matches!(err, RemoveError::Failed(_)), "{err:?}");
     assert!(f.linked.exists());
@@ -1512,8 +1742,14 @@ fn a_refused_switch_does_not_stop_remove() {
     f.h.rex.refuse_select("Turn on Remote Control");
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
 
-    let removed = wf::remove(&f.h.ctx(), &plan, false, Some(&f.current), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    let removed = wf::remove(
+        &f.h.ctx(),
+        &plan,
+        false,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert!(matches!(removed.focus, Focus::Refused(ref m) if m.contains("Remote Control")));
     assert_eq!(
@@ -1531,8 +1767,14 @@ fn without_a_bound_parent_remove_switches_nothing() {
     let plan = wf::plan_remove(&h.ctx(), &s.session).unwrap();
     assert_eq!(plan.parent, None);
 
-    let removed = wf::remove(&h.ctx(), &plan, false, Some(&s.session), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    let removed = wf::remove(
+        &h.ctx(),
+        &plan,
+        false,
+        Some(&s.session),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert_eq!(removed.focus, Focus::NotNeeded);
     assert_eq!(
@@ -1541,6 +1783,27 @@ fn without_a_bound_parent_remove_switches_nothing() {
             session: s.session.clone()
         }]
     );
+}
+
+/// For agents and scripts: everything is removed and closed, and every app
+/// stays where it is, even with a parent to show.
+#[test]
+fn removing_without_switching_leaves_the_apps_alone() {
+    let f = remove_fixture();
+    let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
+    assert!(plan.parent.is_some());
+
+    let removed =
+        wf::remove(&f.h.ctx(), &plan, false, None, Switch::Off).unwrap_or_else(|e| panic!("{e:?}"));
+
+    assert_eq!(removed.focus, Focus::NotNeeded);
+    assert!(!f.linked.exists());
+    let calls = f.h.rex.calls();
+    assert!(
+        calls.iter().all(|c| matches!(c, Call::Destroy { .. })),
+        "{calls:?}"
+    );
+    assert!(!f.h.rex.is_live(&f.current) && !f.h.rex.is_live(&f.sibling));
 }
 
 /// Bindings are re-read at removal time: a session bound to the checkout after
@@ -1553,8 +1816,14 @@ fn remove_drops_late_bindings_but_closes_only_confirmed_sessions() {
     let late = f.h.rex.add_session("late");
     wf::bind(&f.h.ctx(), &late.session, &f.linked).unwrap();
 
-    wf::remove(&f.h.ctx(), &plan, false, Some(&f.current), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    wf::remove(
+        &f.h.ctx(),
+        &plan,
+        false,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert!(!f.h.bindings().contains_key(&late.session));
     assert!(f.h.rex.is_live(&late.session));
@@ -1568,8 +1837,14 @@ fn remove_tolerates_a_session_that_already_closed() {
     let plan = wf::plan_remove(&f.h.ctx(), &f.current).unwrap();
     f.h.rex.kill_externally(&f.sibling);
 
-    let removed = wf::remove(&f.h.ctx(), &plan, false, Some(&f.current), Some(CLIENT))
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    let removed = wf::remove(
+        &f.h.ctx(),
+        &plan,
+        false,
+        Some(&f.current),
+        Switch::App(Some(CLIENT)),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
 
     assert_eq!(removed.closed, std::slice::from_ref(&f.current));
     assert_eq!(destroyed(&f.h.rex.calls()).last(), Some(&f.current));

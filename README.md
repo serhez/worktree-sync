@@ -265,8 +265,11 @@ Rex has no worktrees of its own, so the `rex` backend provides them: each Rex
 session can be bound to a git checkout, and **New**, **Open**, **Remove**,
 **Bind**, and **Sync** actions work from those bindings. New worktrees are set
 up from the same per-repo config as with Herdr, in a `setup` tab beside a ready
-shell. Install the binary with `cargo install --path . --locked`, then follow
-[docs/rex.md](docs/rex.md) to load the actions into Rex.
+shell. The same commands serve scripts and coding agents, which can set a
+worktree up in the background (`new --wait --no-switch`); the
+`skills/rex-worktrees` skill teaches agents to use them. Install the binary with
+`cargo install --path . --locked`, then follow [docs/rex.md](docs/rex.md) to
+load the actions into Rex.
 
 ## Configuration reference
 
@@ -610,6 +613,7 @@ written to `~/.local/state/worktree-sync/rex/reports/`. See
 ├── Cargo.toml
 ├── herdr-plugin.toml          # Herdr plugin manifest (generic, no per-repo settings)
 ├── lua/worktree_sync.lua      # Rex actions; embedded in the binary (`worktree-sync rex lua`)
+├── skills/rex-worktrees/      # agent skill for the `worktree-sync rex` commands
 ├── docs/
 │   ├── rex.md                 # Rex guide
 │   └── rex-bindings.md        # the session-binding file format, for other tools

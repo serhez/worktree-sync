@@ -1,6 +1,7 @@
 //! `worktree-sync rex …`: the commands the Lua module and the terminal blocks
 //! it opens run, also usable from any shell. Prompts live here; the decisions
-//! live in [`super::workflows`].
+//! live in [`super::workflows`]. Results go to stdout; progress and notes for
+//! the user go to stderr.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use super::bindings::{self, Store};
 use super::settings::{self, Settings};
 use super::ui::{self, Status};
 use super::workflows::{
-    self as wf, ActionRequest, Context, Focus, NewLaunch, RemoveError, SetupOutcome, Verb,
+    self as wf, ActionRequest, Context, Focus, NewLaunch, RemoveError, SetupOutcome, Switch, Verb,
 };
 use crate::notify::{self, Outcome};
 use crate::{config, report};
@@ -42,6 +43,9 @@ enum Cmd {
         /// The Rex app to switch.
         #[arg(long)]
         client: Option<String>,
+        /// Leave every Rex app where it is, and print the session.
+        #[arg(long, conflicts_with = "client")]
+        no_switch: bool,
     },
     /// Create a worktree from --from's repository, in a session of its own.
     New {
@@ -52,8 +56,16 @@ enum Cmd {
         #[arg(long, env = "REX_SESSION")]
         from: Option<String>,
         /// Run in the current session, which becomes the worktree's session.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["wait", "no_switch"])]
         here: bool,
+        /// Set the worktree up in this command, with no setup tab and no
+        /// prompts, then print the new session as JSON: `session_id`,
+        /// `block_id` (its shell), `checkout_path` and `branch`.
+        #[arg(long, requires = "branch")]
+        wait: bool,
+        /// Leave every Rex app where it is.
+        #[arg(long, conflicts_with = "client")]
+        no_switch: bool,
         #[arg(long)]
         client: Option<String>,
     },
@@ -68,6 +80,9 @@ enum Cmd {
         /// Also delete modified and untracked files in the worktree.
         #[arg(long)]
         force: bool,
+        /// Leave every Rex app where it is.
+        #[arg(long, conflicts_with = "client")]
+        no_switch: bool,
         #[arg(long)]
         client: Option<String>,
     },
@@ -181,6 +196,14 @@ fn own_session() -> Option<String> {
     std::env::var("REX_SESSION").ok().filter(|s| !s.is_empty())
 }
 
+fn switch(no_switch: bool, client: Option<&str>) -> Switch<'_> {
+    if no_switch {
+        Switch::Off
+    } else {
+        Switch::App(client)
+    }
+}
+
 /// Run `worktree-sync rex …`; `args` starts with the `rex` word.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> Result<()> {
     let cli = Cli::parse_from(args);
@@ -188,6 +211,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> Result<()> {
         print!("{LUA_MODULE}");
         return Ok(());
     }
+    crate::progress_on_stderr();
     let env = Env::load()?;
     let ctx = env.ctx();
     match cli.command {
@@ -210,27 +234,42 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             println!("{}", serde_json::to_string(&outcome)?);
             Ok(())
         }
-        Cmd::Open { path, from, client } => open(&ctx, path, from, client),
+        Cmd::Open {
+            path,
+            from,
+            client,
+            no_switch,
+        } => open(&ctx, path, from, switch(no_switch, client.as_deref())),
         Cmd::New {
             branch,
             base,
             from,
             here,
+            wait,
+            no_switch,
             client,
         } => {
             let from = from.context("--from is required outside Rex")?;
-            if here {
-                new_here(&ctx, branch, base, &from)
-            } else {
-                new_elsewhere(&ctx, branch, base, from, client)
+            let switch = switch(no_switch, client.as_deref());
+            match branch {
+                Some(branch) if wait => new_wait(&ctx, &branch, base.as_deref(), &from, switch),
+                branch if here => new_here(&ctx, branch, base, &from),
+                branch => new_elsewhere(&ctx, branch, base, from, switch),
             }
         }
         Cmd::Remove {
             session,
             yes,
             force,
+            no_switch,
             client,
-        } => remove(&ctx, &session, yes, force, client.as_deref()),
+        } => remove(
+            &ctx,
+            &session,
+            yes,
+            force,
+            switch(no_switch, client.as_deref()),
+        ),
         Cmd::Bind { path, session } => bind(&ctx, path, &session),
         Cmd::Unbind { session } => {
             match wf::unbind(&ctx, &session)? {
@@ -246,7 +285,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> Result<()> {
 /// Tell the user where to go when Rex refused to switch.
 fn report_focus(focus: &Focus, label: &str) {
     if let Focus::Refused(message) = focus {
-        println!("Go to session \"{label}\": {message}");
+        eprintln!("Go to session \"{label}\": {message}");
     }
 }
 
@@ -259,12 +298,7 @@ fn session_label(ctx: &Context, session: &str) -> String {
         .unwrap_or_else(|| session.to_string())
 }
 
-fn open(
-    ctx: &Context,
-    path: Option<PathBuf>,
-    from: Option<String>,
-    client: Option<String>,
-) -> Result<()> {
+fn open(ctx: &Context, path: Option<PathBuf>, from: Option<String>, switch: Switch) -> Result<()> {
     let current = own_session();
     let path = match path {
         Some(path) => path,
@@ -293,13 +327,13 @@ fn open(
             }
         }
     };
-    let opened = wf::open_checkout(ctx, &path, current.as_deref(), client.as_deref())?;
+    let opened = wf::open_checkout(ctx, &path, current.as_deref(), switch)?;
     if let Focus::Refused(_) = &opened.focus {
         report_focus(&opened.focus, &session_label(ctx, &opened.session_id));
         if ui::is_interactive() {
             ui::wait_for_enter();
         }
-    } else if current.is_none() {
+    } else if current.is_none() || switch == Switch::Off {
         println!("{}", opened.session_id);
     }
     Ok(())
@@ -312,7 +346,7 @@ fn new_elsewhere(
     branch: Option<String>,
     base: Option<String>,
     from: String,
-    client: Option<String>,
+    switch: Switch,
 ) -> Result<()> {
     if let Some(branch) = &branch {
         let defaults = wf::new_defaults(ctx, &from, 0)?;
@@ -325,21 +359,38 @@ fn new_elsewhere(
             bail!("{} already exists", target.display());
         }
     }
+    let client = match switch {
+        Switch::App(client) => client.map(str::to_string),
+        Switch::Off => None,
+    };
     let new = wf::launch_new(
         ctx,
         &NewLaunch {
             from,
             branch,
             base,
-            client: client.clone(),
+            client,
         },
     )?;
-    let focus = match ctx.rex.select_session(client.as_deref(), &new.session_id) {
-        Ok(()) => Focus::Switched,
-        Err(e) => Focus::Refused(format!("{e:#}")),
-    };
     println!("{}", new.session_id);
-    report_focus(&focus, "new worktree");
+    report_focus(&wf::show(ctx, switch, &new.session_id), "new worktree");
+    Ok(())
+}
+
+/// `new --wait`: everything in this command, then the session as JSON.
+fn new_wait(
+    ctx: &Context,
+    branch: &str,
+    base: Option<&str>,
+    from: &str,
+    switch: Switch,
+) -> Result<()> {
+    let made = wf::new_worktree(ctx, from, branch, base)?;
+    println!("{}", serde_json::to_string(&made)?);
+    report_focus(
+        &wf::show(ctx, switch, &made.session_id),
+        &session_label(ctx, &made.session_id),
+    );
     Ok(())
 }
 
@@ -425,7 +476,7 @@ fn new_here(
     };
 
     ui::emit(Status::Working, None);
-    match wf::run_setup(ctx, &session, from, &created, &adopted) {
+    match wf::run_setup(ctx, &session, from, &created, Some(&adopted)) {
         SetupOutcome::Succeeded(_) => {
             ui::emit(Status::Clear, None);
             println!("[worktree-sync] done");
@@ -459,13 +510,7 @@ fn show_failure(report: Option<&Path>, error: &str) {
     println!("\n{}", body.as_deref().unwrap_or(error));
 }
 
-fn remove(
-    ctx: &Context,
-    session: &str,
-    yes: bool,
-    force: bool,
-    client: Option<&str>,
-) -> Result<()> {
+fn remove(ctx: &Context, session: &str, yes: bool, force: bool, switch: Switch) -> Result<()> {
     let plan = wf::plan_remove(ctx, session)?;
     let interactive = ui::is_interactive();
     if !yes {
@@ -491,7 +536,7 @@ fn remove(
         }
     }
     let current = own_session();
-    let result = match wf::remove(ctx, &plan, force, current.as_deref(), client) {
+    let result = match wf::remove(ctx, &plan, force, current.as_deref(), switch) {
         Err(RemoveError::NeedsForce(message)) => {
             if !interactive {
                 bail!(
@@ -506,7 +551,7 @@ fn remove(
             if !ui::confirm(&question)? {
                 return Ok(());
             }
-            wf::remove(ctx, &plan, true, current.as_deref(), client)
+            wf::remove(ctx, &plan, true, current.as_deref(), switch)
         }
         other => other,
     };

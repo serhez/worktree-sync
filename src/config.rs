@@ -258,7 +258,7 @@ pub struct CommandConfig {
 pub fn load(repo: &Path, plugin_config: &PluginConfig) -> Result<Config> {
     let path = repo.join(&plugin_config.repo_config_path);
     if !path.is_file() {
-        println!(
+        crate::progress!(
             "[worktree-sync] no config ({}) in {}, nothing to do",
             plugin_config.repo_config_path.display(),
             repo.display()
@@ -266,7 +266,7 @@ pub fn load(repo: &Path, plugin_config: &PluginConfig) -> Result<Config> {
         return Ok(Config::default());
     }
 
-    println!("[worktree-sync] config:   {}", path.display());
+    crate::progress!("[worktree-sync] config:   {}", path.display());
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
 

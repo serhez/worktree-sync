@@ -33,6 +33,11 @@ changes are called out under **Changed** or **Removed**, never **Added**.
   `~/.config/worktree-sync/rex.toml`; see `docs/rex.md`.
 - Rex session bindings in `~/.local/state/worktree-sync/rex/bindings.json`, a
   versioned format other tools can read (`docs/rex-bindings.md`).
+- `worktree-sync rex new BRANCH --wait`, for scripts and agents: sets the
+  worktree up in the calling command and prints its session as JSON.
+  `--no-switch` on `new`, `open` and `remove` leaves the Rex apps where they
+  are. The Rex commands print results on stdout and progress on stderr.
+- `skills/rex-worktrees`, an agent skill for the `worktree-sync rex` commands.
 
 ### Changed
 

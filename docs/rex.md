@@ -107,16 +107,44 @@ default to `$REX_SESSION`. Run `worktree-sync rex <command> --help` for details.
 ```sh
 worktree-sync rex bind [PATH] [--session S]        # bind to the checkout containing PATH (default: cwd)
 worktree-sync rex unbind [--session S]
-worktree-sync rex new [BRANCH] [--base REF] [--from S]
-worktree-sync rex open [PATH] [--from S]            # no PATH: pick (needs a terminal)
-worktree-sync rex remove [--session S] [--yes] [--force]
+worktree-sync rex new [BRANCH] [--base REF] [--from S] [--wait] [--no-switch]
+worktree-sync rex open [PATH] [--from S] [--no-switch]   # no PATH: pick (needs a terminal)
+worktree-sync rex remove [--session S] [--yes] [--force] [--no-switch]
 worktree-sync rex sync [--session S]
 worktree-sync rex lua                               # print the Lua module
 ```
 
+Results go to stdout; progress and notes go to stderr.
+
 Without a terminal, `remove` refuses unless given `--yes`, and refuses a dirty
 worktree unless also given `--force` (which deletes its modified and untracked
 files).
+
+`--no-switch` leaves every Rex app where it is, for work in the background;
+`open` then prints the session it found or made.
+
+From a shell, `new BRANCH` opens the worktree's session with its `setup` tab
+and returns at once. `new BRANCH --wait` does the work in the calling command
+instead, with no `setup` tab and no prompts, and prints the session once the
+setup has finished:
+
+```json
+{"session_id": "session:…", "block_id": "block:…", "checkout_path": "/Users/you/.worktrees/app/feat-login", "branch": "feat/login"}
+```
+
+The session has one tab, `shell`, and `block_id` is its shell. If the setup
+fails, `[failure] action` keeps or removes the worktree as usual, and the
+command exits 1, naming the report and what was kept.
+
+## Agent skill
+
+`skills/rex-worktrees` teaches coding agents these commands. Link it into each
+agent's skills folder:
+
+```sh
+ln -s "$PWD/skills/rex-worktrees" ~/.agents/skills/rex-worktrees
+ln -s "$PWD/skills/rex-worktrees" ~/.claude/skills/rex-worktrees
+```
 
 ## Bindings
 

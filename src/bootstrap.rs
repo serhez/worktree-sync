@@ -116,7 +116,7 @@ pub fn copy_files(source: &Path, worktree: &Path, files: &[String]) -> Result<us
     let mut copied = 0usize;
     for (src, relative) in expand_file_entries(source, files)? {
         copied += copy_into_worktree(&src, worktree, &relative)?;
-        println!("[copy] {}", relative.display());
+        crate::progress!("[copy] {}", relative.display());
     }
     Ok(copied)
 }
@@ -134,10 +134,10 @@ pub fn clone_files(source: &Path, worktree: &Path, files: &[String]) -> Result<u
         prepare_destination_parent(worktree, &relative)?;
         let destination = worktree.join(&relative);
         cloned += clone_entry(&src, &destination)?;
-        println!("[clone] {}", relative.display());
+        crate::progress!("[clone] {}", relative.display());
         let relocated = relocate_cloned_venv_if_present(source, worktree, &destination)?;
         if relocated > 0 {
-            println!(
+            crate::progress!(
                 "[clone] relocated {relocated} files in {}",
                 relative.display()
             );
@@ -276,7 +276,7 @@ fn clone_entry(src: &Path, dst: &Path) -> Result<usize> {
         return Ok(1);
     }
 
-    println!("[clone] skip (unsupported file type): {}", src.display());
+    crate::progress!("[clone] skip (unsupported file type): {}", src.display());
     Ok(0)
 }
 
@@ -336,7 +336,7 @@ pub fn symlink_files(source: &Path, worktree: &Path, files: &[String]) -> Result
                 target.display()
             )
         })?;
-        println!("[symlink] {}", relative.display());
+        crate::progress!("[symlink] {}", relative.display());
     }
     Ok(entries.len())
 }
@@ -367,7 +367,7 @@ fn expand_file_entries(source: &Path, patterns: &[String]) -> Result<Vec<(PathBu
             matched = true;
         }
         if !matched {
-            println!("[files] skip (no matches): {pattern}");
+            crate::progress!("[files] skip (no matches): {pattern}");
         }
     }
 
@@ -467,7 +467,7 @@ pub fn copy_gitignored(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        println!(
+        crate::progress!(
             "[copy] skip discovery: `git ls-files` failed ({})",
             stderr.trim()
         );
@@ -491,12 +491,12 @@ pub fn copy_gitignored(
 
         let src = source.join(&*rel);
         copy_into_worktree(&src, worktree, Path::new(&*rel))?;
-        println!("[copy] {rel}");
+        crate::progress!("[copy] {rel}");
         copied += 1;
     }
 
     if copied == 0 {
-        println!("[copy] no gitignored files matched {patterns:?}");
+        crate::progress!("[copy] no gitignored files matched {patterns:?}");
     }
     Ok(copied)
 }
@@ -590,7 +590,7 @@ fn copy_entry(src: &Path, dst: &Path) -> Result<usize> {
         return Ok(1);
     }
 
-    println!("[copy] skip (unsupported file type): {}", src.display());
+    crate::progress!("[copy] skip (unsupported file type): {}", src.display());
     Ok(0)
 }
 
@@ -695,7 +695,7 @@ fn install_in_dir(base: &Path, label: &str, rules: &[InstallRule]) -> Result<Opt
             Ok(Some(argv))
         }
         None => {
-            println!("[install] no matching install rule in {label}, skipping");
+            crate::progress!("[install] no matching install rule in {label}, skipping");
             Ok(None)
         }
     }
@@ -748,7 +748,7 @@ pub(crate) fn run_command(cwd: &Path, argv: &[String]) -> Result<()> {
             argv.join(" ")
         );
     }
-    println!("[run] {}", argv.join(" "));
+    crate::progress!("[run] {}", argv.join(" "));
 
     // Captured instead of inherited so the failure message can quote it. An
     // exit status alone ("`pnpm install` exited with exit status: 1") is the
