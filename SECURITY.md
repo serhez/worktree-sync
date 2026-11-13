@@ -53,7 +53,7 @@ For anything outside the above — a path traversal that writes outside the
 worktree, a config value that escapes the argv boundary, a secret leaked into
 logs — please report it privately:
 
-1. Open a [private security advisory](https://github.com/serhez/herdr-worktree-sync/security/advisories/new)
+1. Open a [private security advisory](https://github.com/serhez/worktree-sync/security/advisories/new)
    on this repository. Do **not** open a public issue.
 2. Include the config that triggers it, the repo layout, your OS, and what you
    expected instead.

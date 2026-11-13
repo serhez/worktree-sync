@@ -5,8 +5,8 @@ Thanks for taking an interest. Issues and pull requests are both welcome.
 ## Getting set up
 
 ```sh
-git clone git@github.com:serhez/herdr-worktree-sync.git
-cd herdr-worktree-sync
+git clone git@github.com:serhez/worktree-sync.git
+cd worktree-sync
 cargo test
 ```
 

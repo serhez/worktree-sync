@@ -4,7 +4,7 @@
 
 **Copy, clone, or symlink local files, install dependencies, and run hooks when a worktree is born.**
 
-[![CI](https://github.com/serhez/herdr-worktree-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/serhez/herdr-worktree-sync/actions/workflows/ci.yml)
+[![CI](https://github.com/serhez/worktree-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/serhez/worktree-sync/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![herdr 0.7.1+](https://img.shields.io/badge/herdr-0.7.1%2B-2b7489)
 ![platforms: linux | macos](https://img.shields.io/badge/platforms-linux%20%7C%20macos-lightgrey)
@@ -158,14 +158,14 @@ the `[[build]]` steps in the manifest. Linux and macOS only.
 ### Install from GitHub
 
 ```sh
-herdr plugin install serhez/herdr-worktree-sync
+herdr plugin install serhez/worktree-sync
 ```
 
 ### Or link a local checkout (for development)
 
 ```sh
-git clone git@github.com:serhez/herdr-worktree-sync.git
-herdr plugin link ./herdr-worktree-sync        # add --disabled to link without enabling
+git clone git@github.com:serhez/worktree-sync.git
+herdr plugin link ./worktree-sync        # add --disabled to link without enabling
 ```
 
 Either way herdr registers the plugin under the id

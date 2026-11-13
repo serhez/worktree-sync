@@ -9,7 +9,7 @@ edition = "2024"
 rust-version = "1.89"
 description = "Sync worktree files, install dependencies, and run hooks"
 license = "MIT"
-repository = "https://github.com/serhez/herdr-worktree-sync"
+repository = "https://github.com/serhez/worktree-sync"
 readme = "README.md"
 
 [dependencies]

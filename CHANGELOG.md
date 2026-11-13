@@ -93,5 +93,5 @@ changes are called out under **Changed** or **Removed**, never **Added**.
   behaviour change — the schema, the error messages, and unknown-key rejection
   are identical.
 
-[Unreleased]: https://github.com/serhez/herdr-worktree-sync/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/serhez/worktree-sync/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/piesuke/herdr-worktree-bootstrap/releases/tag/v0.1.0
