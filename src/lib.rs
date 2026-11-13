@@ -1,18 +1,18 @@
 //! Bootstrap a freshly created git worktree: copy gitignored files, install
 //! dependencies, and run per-repo hooks.
 //!
-//! The binary (`herdr-worktree-sync`) is a thin wrapper that parses the herdr
-//! event payload and calls [`run`]. Everything that decides *what happens* lives
-//! here so it can be exercised from tests without herdr in the loop.
+//! The lifecycle ([`run`], [`sync_files`]) and the per-repo [`config`] are
+//! host-agnostic; [`backends`] adapts them to each terminal multiplexer. The
+//! binary (`worktree-sync`) is a thin wrapper that picks a backend. Everything
+//! that decides *what happens* lives here so it can be exercised from tests
+//! without a host in the loop.
 
-pub mod action;
+pub mod backends;
 pub mod bootstrap;
 pub mod config;
-pub mod event;
-pub mod herdr;
+pub mod git;
 pub mod notify;
 pub mod report;
-pub mod rollback;
 
 use std::path::Path;
 

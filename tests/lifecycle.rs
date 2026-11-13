@@ -7,7 +7,7 @@
 mod common;
 
 use common::Dir;
-use herdr_worktree_sync::{config, run};
+use worktree_sync::{config, run};
 
 /// A source repo carrying `config_toml`, plus an empty worktree to bootstrap.
 fn setup(config_toml: &str) -> (Dir, Dir, config::Config) {

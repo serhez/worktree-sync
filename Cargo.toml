@@ -1,12 +1,12 @@
 [package]
-name = "herdr-worktree-sync"
+name = "worktree-sync"
 version = "0.2.0"
 edition = "2024"
-# herdr builds this plugin from source on the user's machine, so the toolchain
-# floor is the user's problem the moment it is wrong. Declaring it turns a
-# edition-2024 parse error deep in the build into cargo saying which version it
-# needs.
-rust-version = "1.85"
+# Users build this from source (herdr does so on install), so the toolchain
+# floor is the user's problem the moment it is wrong. Declaring it turns an
+# obscure build error into cargo saying which version it needs. 1.89 is the
+# first release with std `File::lock`, which guards the Rex binding file.
+rust-version = "1.89"
 description = "Sync worktree files, install dependencies, and run hooks"
 license = "MIT"
 repository = "https://github.com/serhez/herdr-worktree-sync"
@@ -14,7 +14,10 @@ readme = "README.md"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.23"
+clap = { version = "4.6", features = ["derive", "env"] }
 glob = "0.3"
+inquire = "0.9"
 pathdiff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,11 +25,14 @@ serde_yaml_ng = "0.10"
 toml = "1.1"
 
 [dev-dependencies]
+# Runs the Rex Lua module against a stubbed `rex` table; vendored so the tests
+# need no system Lua.
+mlua = { version = "0.12", features = ["lua51", "vendored"] }
 tempfile = "3"
 
 # The library target is auto-discovered from src/lib.rs as
-# `herdr_worktree_sync`; the binary below is a thin wrapper over it so the
+# `worktree_sync`; the binary below is a thin wrapper over it so the
 # worktree lifecycle stays testable from `tests/`.
 [[bin]]
-name = "herdr-worktree-sync"
+name = "worktree-sync"
 path = "src/main.rs"

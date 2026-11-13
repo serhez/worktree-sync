@@ -56,7 +56,7 @@ fn default_repo_config_path() -> PathBuf {
     PathBuf::from(DEFAULT_REPO_CONFIG_PATH)
 }
 
-fn validate_repo_config_path(path: &Path) -> Result<()> {
+pub(crate) fn validate_repo_config_path(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
         || path
             .components()

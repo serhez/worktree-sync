@@ -10,9 +10,10 @@ cd herdr-worktree-sync
 cargo test
 ```
 
-A stable Rust toolchain is all you need — no herdr installation required to
-work on this. The lifecycle lives in the library, so `cargo test` drives it
-directly without an event payload.
+A stable Rust toolchain (1.89+) is all you need — no Herdr or Rex installation
+required to work on this. The lifecycle lives in the library, so `cargo test`
+drives it directly without an event payload, and the Rex workflows run against
+an in-memory fake of Rex.
 
 **Linux and macOS only.** The integration tests shell out to `sh`, and
 `herdr-plugin.toml` declares those two platforms. Windows was dropped
@@ -39,11 +40,16 @@ anywhere — including in `tests/` — fails the build.
 | `src/lib.rs` | `run()` — the phase order and fail-fast behaviour |
 | `src/bootstrap.rs` | copy / install / hook execution, and `BUILTIN_RULES` |
 | `src/config.rs` | the config schema and configured path loading |
-| `src/event.rs` | `HERDR_PLUGIN_EVENT_JSON` types |
-| `src/main.rs` | a thin wrapper: parse the event, call `run()` |
+| `src/notify.rs`, `src/report.rs` | host-neutral toast wording and failure report |
+| `src/git.rs` | repo identity, Herdr-compatible naming, worktree add/remove |
+| `src/backends/herdr/` | the Herdr plugin: event and action entry, toast, pane, rollback |
+| `src/backends/rex/` | the Rex backend: CLI, workflows, the `Rex` trait, bindings, settings, prompts |
+| `lua/worktree_sync.lua` | the Rex actions; embedded in the binary |
+| `src/main.rs` | a thin wrapper: pick the backend |
 
 Keep `main.rs` thin. It is the one part the test suite cannot reach, so logic
-that lands there is logic that stops being covered.
+that lands there is logic that stops being covered. For the same reason the Lua
+module only forwards to `worktree-sync rex action`; the logic stays in Rust.
 
 ## Tests
 
@@ -58,15 +64,24 @@ commands *is* the behaviour under test. `tests/common/mod.rs` has the helpers;
 note that `init_repo()` sets `core.excludesFile=/dev/null` so your personal
 global gitignore can't change the result.
 
+**Rex is the one thing faked.** Every call into Rex goes through the `Rex` trait
+in `src/backends/rex/api.rs`; the workflow tests use `FakeRex` from
+`tests/rex_support/` with real git repos, and `RexCli` itself is tested against a
+scripted `rex` executable. `tests/rex_lua.rs` runs the Lua module under Lua 5.1
+and checks that every command it builds parses. Nothing in the suite needs a
+running Rex; try changes against a live Rex only with throwaway sessions, and
+point `XDG_STATE_HOME` and `XDG_CONFIG_HOME` at a temporary directory first.
+
 Name the test after what it asserts, in a sentence:
 `a_failing_pre_hook_aborts_before_copy`, not `test_hooks_2`.
 
 ## Two things that bite
 
 **Bump both manifests together.** The version lives in `Cargo.toml` *and*
-`herdr-plugin.toml`, and neither tool reads the other's file. `tests/manifest.rs`
-fails if they disagree — that test is the only thing standing between a
-half-bumped version and a plugin that breaks the next time herdr fires an event.
+`herdr-plugin.toml`, and neither tool reads the other's file.
+`tests/herdr_manifest.rs` fails if they disagree — that test is the only thing
+standing between a half-bumped version and a plugin that breaks the next time
+herdr fires an event.
 
 **Adding an install rule** means three edits, not one:
 
@@ -81,6 +96,14 @@ half-bumped version and a plugin that breaks the next time herdr fires an event.
 Per `AGENTS.md`: the code says *how*, the tests say *what*, the commit log says
 *why*, and code comments say *why not*. A commit message that restates the diff
 is a wasted one — say what made the change necessary.
+
+## Changing the Rex binding file
+
+Other tools read the binding file, and [`docs/rex-bindings.md`](docs/rex-bindings.md)
+is its contract. A new optional field is fine; renaming, removing, or changing
+the meaning of one requires bumping `VERSION` in `src/backends/rex/bindings.rs`,
+a new fixture, and an updated contract. The suite checks that the doc embeds
+`tests/fixtures/bindings-v1.json` verbatim.
 
 ## Changing the config schema
 
@@ -107,7 +130,7 @@ matters.
    and add a fresh empty `## [Unreleased]` above it. This becomes the release
    body verbatim; the workflow fails if the section is empty.
 2. **Bump the version in both manifests** — `Cargo.toml` and
-   `herdr-plugin.toml`. `tests/manifest.rs` catches it if you do only one.
+   `herdr-plugin.toml`. `tests/herdr_manifest.rs` catches it if you do only one.
 3. **Run `cargo build`** so `Cargo.lock` picks up the new version, and commit it.
    CI runs `--locked` and will fail on a stale lockfile.
 4. Merge to `main`, then:

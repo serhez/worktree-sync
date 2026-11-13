@@ -3,7 +3,7 @@
 mod common;
 
 use common::Dir;
-use herdr_worktree_sync::bootstrap;
+use worktree_sync::bootstrap;
 
 #[cfg(target_os = "macos")]
 #[test]

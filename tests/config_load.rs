@@ -4,7 +4,7 @@
 mod common;
 
 use common::Dir;
-use herdr_worktree_sync::config::{self, Config, PluginConfig};
+use worktree_sync::config::{self, Config, PluginConfig};
 
 /// The shipped examples, compiled in so a broken sample fails CI rather than a
 /// user's first run.

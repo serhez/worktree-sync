@@ -1,6 +1,6 @@
 <div align="center">
 
-# Worktree Sync for Herdr
+# Worktree Sync
 
 **Copy, clone, or symlink local files, install dependencies, and run hooks when a worktree is born.**
 
@@ -12,11 +12,16 @@
 
 </div>
 
-A [Herdr](https://github.com/herdrdev/herdr) plugin that prepares freshly
-created git worktrees: it copies gitignored files (like `.env`), makes APFS
-copy-on-write clones, symlinks shared files or directories, installs
-dependencies, and runs your own pre/post commands automatically on
-`worktree.created`. Its `sync` action can re-apply all file operations later.
+Prepares freshly created git worktrees: it copies gitignored files (like
+`.env`), makes APFS copy-on-write clones, symlinks shared files or directories,
+installs dependencies, and runs your own pre/post commands. A `sync` action can
+re-apply all file operations later. It works with two terminal multiplexers:
+
+- **[Herdr](https://github.com/herdrdev/herdr)**, as a plugin: Herdr creates
+  worktrees, and the plugin sets each one up on `worktree.created`.
+- **Rex**, which has no worktree support of its own: the `worktree-sync rex`
+  commands and actions also create, open, and remove worktrees, one Rex session
+  each. See [docs/rex.md](docs/rex.md).
 
 This project is a fork of
 [piesuke/herdr-worktree-bootstrap](https://github.com/piesuke/herdr-worktree-bootstrap).
@@ -58,18 +63,20 @@ command = ["direnv", "allow"]
 - **Loud about typos** — unknown config keys are an error, not a silent default.
 - **Fail-fast** — the first non-zero exit aborts the run, instead of leaving you
   to discover it later.
-- **Tells you what it did** — a herdr toast when the worktree is ready, or when
-  the setup aborted and why, with the failing command's own output quoted.
-- **Shows you the whole error** — a failure also opens a scrollable pane with
-  the full report, because a toast is too small for a package manager's answer.
+- **Tells you what it did** — a toast when the worktree is ready, or when the
+  setup aborted and why, with the failing command's own output quoted.
+- **Shows you the whole error** — a failure also shows the full report in a
+  scrollable terminal, because a toast is too small for a package manager's
+  answer.
 - **Optionally cleans up after itself** — `[failure] action = "remove"` takes a
   worktree whose setup failed back out again.
 
 ## Table of contents
 
 - [How it works](#how-it-works)
-- [Installing the plugin](#installing-the-plugin)
-- [Using it](#using-it)
+- [Installing the Herdr plugin](#installing-the-herdr-plugin)
+- [Using it with Herdr](#using-it-with-herdr)
+- [Using it with Rex](#using-it-with-rex)
 - [Configuration reference](#configuration-reference)
 - [Project layout](#project-layout)
 - [Development](#development)
@@ -82,28 +89,28 @@ Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 ## How it works
 
 ```
-Herdr (worktree.created)
-  └─ ./target/release/herdr-worktree-sync
-       │  reads HERDR_PLUGIN_EVENT_JSON (worktree path, branch, source repo_root)
-       │  loads the configured per-repo TOML or YAML file
-       │
-       ├─ git update     bring git up to date (e.g. fetch) — optional
-       ├─ pre hooks      commands run before file operations/install
-       ├─ copy           <repo>/<path>  ->  <worktree>/<path>
-       ├─ clone          <repo>/<path>  =>  <worktree>/<path> (APFS CoW)
-       ├─ symlink        <repo>/<path>  ->  <worktree>/<path>
-       ├─ install        detect package manager from lockfiles, install
-       ├─ post hooks     commands run after file operations + install
-       ├─ notify         herdr toast: what ran, or what failed
-       └─ on failure     full report in a pane, and optionally a rollback
+Herdr: worktree.created → worktree-sync herdr    (reads HERDR_PLUGIN_EVENT_JSON)
+Rex:   New Worktree…    → worktree-sync rex new  (creates the worktree and its session)
+  │
+  │  loads the configured per-repo TOML or YAML file
+  │
+  ├─ git update     bring git up to date (e.g. fetch) — optional
+  ├─ pre hooks      commands run before file operations/install
+  ├─ copy           <repo>/<path>  ->  <worktree>/<path>
+  ├─ clone          <repo>/<path>  =>  <worktree>/<path> (APFS CoW)
+  ├─ symlink        <repo>/<path>  ->  <worktree>/<path>
+  ├─ install        detect package manager from lockfiles, install
+  ├─ post hooks     commands run after file operations + install
+  ├─ notify         toast: what ran, or what failed
+  └─ on failure     full report in a terminal, and optionally a rollback
 ```
 
 Lifecycle order: **git update → pre → copy → clone → symlink → install → post**.
 Any non-zero exit aborts the whole setup (fail-fast). If a repo has no config file, the
-plugin does nothing. Whatever the outcome, the run ends with a toast — see
+run does nothing. Whatever the outcome, the run ends with a toast — see
 [`[notify]`](#notify--announce-the-result) for the herdr setting it needs — and
-a failure additionally opens the
-[failure pane](#failure--what-happens-to-a-worktree-that-failed).
+a failure additionally shows the
+[full report](#failure--what-happens-to-a-worktree-that-failed).
 
 ### Config format: TOML or YAML
 
@@ -131,8 +138,8 @@ does nothing is the most expensive failure mode here.
 
 ### Custom repo config path
 
-The default can be replaced with one repository-relative path in the plugin's
-user config:
+The default can be replaced with one repository-relative path in the user
+config — the Herdr plugin's, or Rex's [`rex.toml`](docs/rex.md#settings):
 
 ```toml
 # $(herdr plugin config-dir serhez.herdr.worktree.sync)/config.toml
@@ -142,10 +149,10 @@ repo_config_path = "config/worktree.yaml"
 The path must stay inside the repository and end in `.toml`, `.yaml`, or
 `.yml`. Only the configured path is checked.
 
-## Installing the plugin
+## Installing the Herdr plugin
 
 Requires **herdr 0.7.1+** (`min_herdr_version` in the manifest) and a **Rust
-1.85+** toolchain — herdr builds the binary from source on your machine, with
+1.89+** toolchain — herdr builds the binary from source on your machine, with
 the `[[build]]` steps in the manifest. Linux and macOS only.
 
 ### Install from GitHub
@@ -168,8 +175,8 @@ Either way herdr registers the plugin under the id
 ### Build the binary
 
 The manifest declares the build steps (`cargo fetch`, then
-`cargo build --release`), which produce `./target/release/herdr-worktree-sync`
-— the binary `[[events]]` invokes. If that file doesn't exist after installing,
+`cargo build --release`), which produce `./target/release/worktree-sync` —
+the binary `[[events]]` invokes as `worktree-sync herdr`. If that file doesn't exist after installing,
 run the build yourself from the plugin root:
 
 ```sh
@@ -186,7 +193,7 @@ The entry should show `enabled: true`. Editing `herdr-plugin.toml` afterwards
 does **not** require re-linking — herdr re-reads the manifest from
 `manifest_path` on its own.
 
-## Using it
+## Using it with Herdr
 
 Once installed, the plugin is entirely passive: it runs whenever herdr creates a
 worktree, for every repo. What it *does* is decided per repository.
@@ -251,6 +258,15 @@ herdr plugin enable  serhez.herdr.worktree.sync
 herdr plugin unlink  serhez.herdr.worktree.sync   # remove a linked local checkout
 herdr plugin uninstall serhez.herdr.worktree.sync # remove an installed copy
 ```
+
+## Using it with Rex
+
+Rex has no worktrees of its own, so the `rex` backend provides them: each Rex
+session can be bound to a git checkout, and **New**, **Open**, **Remove**,
+**Bind**, and **Sync** actions work from those bindings. New worktrees are set
+up from the same per-repo config as with Herdr, in a `setup` tab beside a ready
+shell. Install the binary with `cargo install --path . --locked`, then follow
+[docs/rex.md](docs/rex.md) to load the actions into Rex.
 
 ## Configuration reference
 
@@ -513,6 +529,10 @@ prevent. Turn it down with:
 A run where no phase was enabled (a repo with no config) never toasts, whatever
 `when` says.
 
+In Rex, the success toast is a small floating terminal in the new worktree's
+`shell` tab, and a failure sets Rex's error indicator on the `setup` tab; no
+Rex setting is needed.
+
 > **herdr must be set to deliver toasts.** They are off in herdr's own default
 > config, so until you set `[ui.toast] delivery` in *herdr's* `config.toml`
 > nothing appears and `herdr notification show` quietly answers
@@ -579,47 +599,62 @@ via a non-forcing `git branch -d` that refuses if you committed something).
 > that caused the failure would block it — so anything you typed or wrote in
 > that window goes with it.
 
+In Rex, the report stays on screen in the `setup` tab (or, after a `remove`
+rollback, opens in the session the worktree was created from), and the file is
+written to `~/.local/state/worktree-sync/rex/reports/`. See
+[docs/rex.md](docs/rex.md#setup-results).
+
 ## Project layout
 
 ```
 ├── Cargo.toml
-├── herdr-plugin.toml        # plugin manifest (generic, no per-repo settings)
+├── herdr-plugin.toml          # Herdr plugin manifest (generic, no per-repo settings)
+├── lua/worktree_sync.lua      # Rex actions; embedded in the binary (`worktree-sync rex lua`)
+├── docs/
+│   ├── rex.md                 # Rex guide
+│   └── rex-bindings.md        # the session-binding file format, for other tools
 ├── examples/
-│   ├── worktree-sync.toml   # sample config for consumers to copy
-│   └── worktree-sync.yaml   # the same config in YAML
+│   ├── worktree-sync.toml     # sample config for consumers to copy
+│   └── worktree-sync.yaml     # the same config in YAML
 ├── src/
-│   ├── action.rs            # manual file synchronization
-│   ├── main.rs              # binary: parse the event, then hand off to run()
-│   ├── lib.rs               # run(): the bootstrap lifecycle
-│   ├── event.rs             # HERDR_PLUGIN_EVENT_JSON types
-│   ├── config.rs            # plugin settings and per-repo config loading
-│   ├── bootstrap.rs         # copy / clone / symlink / install / hook execution
-│   ├── herdr.rs             # which herdr binary the plugin calls back into
-│   ├── notify.rs            # the end-of-run herdr toast
-│   ├── report.rs            # the full failure report and the pane showing it
-│   └── rollback.rs          # `[failure] action = "remove"`
+│   ├── main.rs                # binary: `worktree-sync herdr` or `worktree-sync rex …`
+│   ├── lib.rs                 # run(): the bootstrap lifecycle; sync_files()
+│   ├── config.rs              # per-repo config schema and loading
+│   ├── bootstrap.rs           # copy / clone / symlink / install / hook execution
+│   ├── notify.rs              # the end-of-run toast's wording
+│   ├── report.rs              # the full failure report
+│   ├── git.rs                 # repo identity, Herdr-compatible naming, worktree add/remove
+│   └── backends/
+│       ├── herdr/             # event and action entry, toast, failure pane, rollback
+│       └── rex/
+│           ├── cli.rs         # `worktree-sync rex …` commands
+│           ├── workflows.rs   # open / new / remove / bind / sync
+│           ├── api.rs         # every call into Rex, behind one trait
+│           ├── bindings.rs    # the session-binding file
+│           ├── settings.rs    # rex.toml
+│           └── ui.rs          # prompts, toasts, status escapes
 └── tests/
-    ├── common/mod.rs        # temp dirs and throwaway git repos
-    ├── config_load.rs       # which config file wins; the examples still parse
-    ├── copy.rs              # discovery and explicit copying
-    ├── clone.rs             # APFS copy-on-write cloning
-    ├── symlink.rs           # declarative shared paths
-    ├── sync.rs              # manual action context and behavior
-    ├── lifecycle.rs         # phase order and fail-fast
-    └── manifest.rs          # Cargo.toml and herdr-plugin.toml agree
+    ├── common/mod.rs          # temp dirs and throwaway git repos
+    ├── config_load.rs         # which config file wins; the examples still parse
+    ├── copy.rs, clone.rs, symlink.rs, lifecycle.rs   # the shared lifecycle
+    ├── git.rs                 # naming vectors and worktree plumbing
+    ├── herdr_*.rs             # Herdr event, sync action, and manifest
+    ├── rex_*.rs               # Rex backend: workflows over a fake Rex, CLI, Lua, bindings
+    ├── rex_support/           # fake Rex and workflow harness
+    └── fixtures/              # the binding-file example docs/rex-bindings.md embeds
 ```
 
 The two manifests are read by different tools — `Cargo.toml` by cargo,
 `herdr-plugin.toml` by herdr — and neither reads the other, so their overlap
 (the version, the binary's name and path) is hand-maintained and drifts
-silently. `tests/manifest.rs` is the handshake: bump the version in one file
-only, or rename the binary, and CI says so instead of the plugin failing the
-next time herdr fires the event.
+silently. `tests/herdr_manifest.rs` is the handshake: bump the version in one
+file only, or rename the binary, and CI says so instead of the plugin failing
+the next time herdr fires the event.
 
 The crate is a library plus a thin binary. Everything that decides *what
 happens* lives in the library, so the lifecycle can be tested without herdr in
-the loop; `main.rs` selects the creation event or manual action, loads the
-repo's config, and calls the corresponding library entrypoint.
+the loop; `main.rs` only picks the backend. The Rex workflows talk to Rex
+through one trait, so the tests drive them against an in-memory fake.
 
 ## Development
 
@@ -649,7 +684,7 @@ on Linux and macOS, so the three commands above are the whole gate.
 Two things worth knowing before you open a PR:
 
 - **Bump both manifests together.** The version lives in `Cargo.toml` *and*
-  `herdr-plugin.toml`; `tests/manifest.rs` fails if they disagree.
+  `herdr-plugin.toml`; `tests/herdr_manifest.rs` fails if they disagree.
 - **Adding an install rule?** Add it to `BUILTIN_RULES` in `src/bootstrap.rs`,
   to the table above, and to the detection tests — order matters, because the
   first matching marker wins.

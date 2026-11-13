@@ -16,14 +16,14 @@ command = ["cargo", "build", "--release"]
 # — see examples/worktree-sync.toml for the schema.
 [[events]]
 on = "worktree.created"
-command = ["./target/release/herdr-worktree-sync"]
+command = ["./target/release/worktree-sync", "herdr"]
 
 [[actions]]
 id = "sync"
 title = "Sync worktree files"
 description = "Re-apply configured copy, clone, and symlink operations to the focused worktree"
 contexts = ["workspace"]
-command = ["./target/release/herdr-worktree-sync"]
+command = ["./target/release/worktree-sync", "herdr"]
 
 # Opened by the plugin when a worktree setup fails, on a report file whose path
 # arrives in $WORKTREE_SYNC_REPORT. A toast — and herdr's own dialog —

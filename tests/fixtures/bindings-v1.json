@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "hosts": {
+    "fcf58739-fba5-4b01-b6cf-022cd6ea6b06": {
+      "sessions": {
+        "session:01a1d1dc-1bdf-7111-bc71-452288dfffa8": {
+          "repo_key": "/Users/ser/dev/app/.git",
+          "repo_name": "app",
+          "checkout_path": "/Users/ser/dev/.worktrees/app/feat-login",
+          "branch": "feat/login",
+          "is_linked_worktree": true,
+          "bound_at": 1794522240
+        },
+        "session:01a1d1dc-2c4e-7a10-9d3b-1f0e5a6c7b8d": {
+          "repo_key": "/Users/ser/dev/app/.git",
+          "repo_name": "app",
+          "checkout_path": "/Users/ser/dev/app",
+          "branch": null,
+          "is_linked_worktree": false,
+          "bound_at": 1794520000
+        }
+      }
+    }
+  }
+}

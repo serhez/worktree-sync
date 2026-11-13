@@ -4,7 +4,8 @@
 mod common;
 
 use common::Dir;
-use herdr_worktree_sync::{action, config::PluginConfig};
+use worktree_sync::backends::herdr::action;
+use worktree_sync::config::PluginConfig;
 
 #[test]
 fn sync_reapplies_copy_and_symlink_operations_to_the_focused_worktree() {

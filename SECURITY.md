@@ -33,6 +33,20 @@ untrusted state, and reserve symlinks for paths meant to be shared.
 from config values — but `["sh", "-c", ...]` is a documented escape hatch, and
 anything inside it is your responsibility.
 
+**Removing a worktree deletes its files, with consent.** In Rex, Remove
+Worktree runs `git worktree remove`, which deletes the worktree folder and its
+gitignored files (copied secrets, `node_modules`). If git refuses because of
+modified or untracked files, those are deleted only after a second explicit
+confirmation, or with `worktree-sync rex remove --force` on the command line.
+The tool never deletes files itself, never forces a locked worktree, and never
+deletes a branch on remove. It also closes every Rex session bound to that
+worktree, ending the programs running in them.
+
+**Rex's Remote Control lets local processes drive the app.** worktree-sync
+works without it, but uses it when it is on to switch the session you are
+looking at. Turning it on lets any process running as your user send actions to
+the Rex app, not just this one; that is Rex's setting and your call.
+
 ## Reporting a vulnerability
 
 For anything outside the above — a path traversal that writes outside the
@@ -50,8 +64,8 @@ advisory published alongside it.
 
 ## Scope
 
-In scope: this plugin's own code — the copy, clone, symlink, install, hook, and
-config-loading paths.
+In scope: this project's own code — the copy, clone, symlink, install, hook, and
+config-loading paths, the Rex worktree commands, and the Rex binding file.
 
-Out of scope: [herdr](https://github.com/herdrdev/herdr) itself (report there),
-and the package managers this plugin invokes on your behalf.
+Out of scope: [herdr](https://github.com/herdrdev/herdr) and Rex themselves
+(report to them), and the package managers this tool invokes on your behalf.

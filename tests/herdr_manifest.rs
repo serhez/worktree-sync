@@ -13,6 +13,7 @@ const CARGO_MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[derive(Deserialize)]
 struct Plugin {
+    id: String,
     version: String,
     description: String,
     platforms: Vec<String>,
@@ -121,6 +122,34 @@ fn the_sync_action_invokes_the_binary_cargo_builds() {
     assert_eq!(sync.command.first(), Some(&expected));
 }
 
+/// The binary hosts several backends and picks one from its first argument,
+/// so a command that names the binary but not `herdr` reaches no backend.
+#[test]
+fn every_herdr_command_selects_the_herdr_backend() {
+    let plugin = plugin();
+    let expected = [
+        format!("./target/release/{}", binary_name()),
+        "herdr".to_string(),
+    ];
+    let commands = plugin
+        .events
+        .iter()
+        .map(|event| &event.command)
+        .chain(plugin.actions.iter().map(|action| &action.command));
+
+    for command in commands {
+        assert_eq!(command.as_slice(), expected.as_slice());
+    }
+}
+
+/// herdr keys installs, plugin config directories and keybindings
+/// (`serhez.herdr.worktree.sync.sync`) on the id, so changing it would orphan
+/// every existing install's settings.
+#[test]
+fn the_plugin_id_is_unchanged() {
+    assert_eq!(plugin().id, "serhez.herdr.worktree.sync");
+}
+
 /// The event path points into `target/release`, which only exists if the
 /// manifest actually asks for a release build.
 #[test]
@@ -146,9 +175,9 @@ fn the_failure_pane_entrypoint_exists_in_the_manifest() {
         plugin
             .panes
             .iter()
-            .any(|pane| pane.id == herdr_worktree_sync::report::PANE_ENTRYPOINT),
+            .any(|pane| pane.id == worktree_sync::backends::herdr::pane::PANE_ENTRYPOINT),
         "no `[[panes]]` entry with id `{}`",
-        herdr_worktree_sync::report::PANE_ENTRYPOINT
+        worktree_sync::backends::herdr::pane::PANE_ENTRYPOINT
     );
 }
 
@@ -157,11 +186,11 @@ fn the_failure_pane_entrypoint_exists_in_the_manifest() {
 /// expands, with nothing but spelling holding the two together.
 #[test]
 fn the_failure_pane_reads_the_env_var_the_plugin_sets() {
-    let var = herdr_worktree_sync::report::REPORT_PATH_VAR;
+    let var = worktree_sync::backends::herdr::pane::REPORT_PATH_VAR;
     let pane = plugin()
         .panes
         .into_iter()
-        .find(|pane| pane.id == herdr_worktree_sync::report::PANE_ENTRYPOINT)
+        .find(|pane| pane.id == worktree_sync::backends::herdr::pane::PANE_ENTRYPOINT)
         .expect("the failure pane should exist");
 
     assert!(

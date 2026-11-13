@@ -7,7 +7,7 @@
 mod common;
 
 use common::{Dir, init_repo};
-use herdr_worktree_sync::bootstrap;
+use worktree_sync::bootstrap;
 
 /// A source repo shaped like a small monorepo: committed files in each package
 /// (so git doesn't collapse the package as wholly-ignored) plus gitignored env

@@ -3,7 +3,7 @@
 mod common;
 
 use common::Dir;
-use herdr_worktree_sync::bootstrap;
+use worktree_sync::bootstrap;
 
 #[test]
 fn symlink_entries_accept_files_directories_and_globs() {

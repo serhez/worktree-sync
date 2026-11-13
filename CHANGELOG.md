@@ -27,6 +27,18 @@ changes are called out under **Changed** or **Removed**, never **Added**.
   `.worktree-sync.toml`.
 - Renamed the fork to Worktree Sync and its plugin ID to
   `serhez.herdr.worktree.sync`.
+- Rex backend: `worktree-sync rex` commands and Rex actions (`lua/worktree_sync.lua`)
+  that bind Rex sessions to git checkouts and create, open, remove, and sync
+  worktrees, running the same per-repo setup. Settings in
+  `~/.config/worktree-sync/rex.toml`; see `docs/rex.md`.
+- Rex session bindings in `~/.local/state/worktree-sync/rex/bindings.json`, a
+  versioned format other tools can read (`docs/rex-bindings.md`).
+
+### Changed
+
+- The package and binary are renamed `worktree-sync`; Herdr runs it as
+  `worktree-sync herdr`. The Herdr plugin ID is unchanged.
+- The minimum Rust version is 1.89.
 
 ## [0.1.0] - 2026-09-16
 
